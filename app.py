@@ -1,3 +1,4 @@
+
 """
 TINTA - AI PERSONAL COLOR ANALYSIS
 COMPLETE LUXURY BEAUTY APP  —  ALL GAPS FIXED
@@ -619,21 +620,6 @@ def detect_face_and_extract_skin(img_bgr):
     x, y = max(0, x), max(0, y)
     w_f, h_f = min(w - x, w_f), min(h - y, h_f)
 
-    # ── Gate 0: Eye detection — must find at least one forward-facing eye ──
-    # haarcascade_frontalface_default detects the back of heads, side profiles,
-    # and textured objects. Requiring at least one detectable eye inside the
-    # face bounding box ensures the face is actually front-facing.
-    face_roi_gray = cv2.cvtColor(img_bgr[y:y+h_f, x:x+w_f], cv2.COLOR_BGR2GRAY)
-    # Search only the upper 60% of the face box (eyes are never in the chin area)
-    upper_roi = face_roi_gray[:int(h_f * 0.60), :]
-    eyes_found = eye_cascade.detectMultiScale(upper_roi, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20))
-    if len(eyes_found) == 0:
-        # Retry with relaxed params — handles slightly rotated faces
-        eyes_found = eye_cascade.detectMultiScale(upper_roi, scaleFactor=1.05, minNeighbors=3, minSize=(15, 15))
-    if len(eyes_found) == 0:
-        return None, "no_face_forward"
-    # ── End Gate 0 ────────────────────────────────────────────────────────
-
     # ── Human verification ────────────────────────────────────────────────
     # Sample the central forehead + cheek regions to check for human skin tones
     # and real skin texture. Non-human subjects (dolls, cartoons, animals, printed
@@ -720,26 +706,6 @@ def detect_face_and_extract_skin(img_bgr):
         if hf_mean < 3.5 and edge_density < 0.055:
             return None, "not_human"
     # ── End Gate 3b ───────────────────────────────────────────────────────
-
-    # ── Gate 4: Sclera (eye white) check
-    # Real human eyes have visible white sclera — bright, near-white pixels
-    # in the eye region. Stuffed animals, dolls, and most non-humans lack this.
-    # Eye region = upper-middle third of the face box.
-    eye_y1 = max(0, y + int(h_f * 0.20))
-    eye_y2 = min(h, y + int(h_f * 0.50))
-    eye_x1 = max(0, x + int(w_f * 0.05))
-    eye_x2 = min(w, x + int(w_f * 0.95))
-    if eye_y2 > eye_y1 and eye_x2 > eye_x1:
-        eye_region = img_bgr[eye_y1:eye_y2, eye_x1:eye_x2]
-        if eye_region.size > 0:
-            gray_eye = cv2.cvtColor(eye_region, cv2.COLOR_BGR2GRAY)
-            # Sclera pixels: very bright (>200) and low saturation
-            eye_hsv = cv2.cvtColor(eye_region, cv2.COLOR_BGR2HSV)
-            sclera_mask = (gray_eye > 200) & (eye_hsv[:,:,1] < 40)
-            sclera_ratio = float(np.sum(sclera_mask)) / sclera_mask.size
-            # Real human eyes: at least 1.5% of eye region is bright white sclera
-            if sclera_ratio < 0.015:
-                return None, "not_human"
 
     # ── Gate 5: Uniform-colour / fur / plush guard
     # Real human skin has natural variation across R, G, B channels.
