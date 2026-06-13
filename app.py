@@ -663,7 +663,48 @@ def detect_face_and_extract_skin(img_bgr):
     if flat_color_count >= 3:
         return None, "not_human"
 
-    # ── Gate 4: AI-powered human verification (Claude API)
+    # ── Gate 4: Sclera (eye white) check
+    # Real human eyes have visible white sclera — bright, near-white pixels
+    # in the eye region. Stuffed animals, dolls, and most non-humans lack this.
+    # Eye region = upper-middle third of the face box.
+    eye_y1 = max(0, y + int(h_f * 0.20))
+    eye_y2 = min(h, y + int(h_f * 0.50))
+    eye_x1 = max(0, x + int(w_f * 0.05))
+    eye_x2 = min(w, x + int(w_f * 0.95))
+    if eye_y2 > eye_y1 and eye_x2 > eye_x1:
+        eye_region = img_bgr[eye_y1:eye_y2, eye_x1:eye_x2]
+        if eye_region.size > 0:
+            gray_eye = cv2.cvtColor(eye_region, cv2.COLOR_BGR2GRAY)
+            # Sclera pixels: very bright (>200) and low saturation
+            eye_hsv = cv2.cvtColor(eye_region, cv2.COLOR_BGR2HSV)
+            sclera_mask = (gray_eye > 200) & (eye_hsv[:,:,1] < 40)
+            sclera_ratio = float(np.sum(sclera_mask)) / sclera_mask.size
+            # Real human eyes: at least 1.5% of eye region is bright white sclera
+            if sclera_ratio < 0.015:
+                return None, "not_human"
+
+    # ── Gate 5: Uniform-colour / fur / plush guard
+    # Real human skin has natural variation across R, G, B channels.
+    # Stuffed animals and dolls tend to have highly uniform, single-hue regions.
+    # We check the full face crop: if all three channels have very low std
+    # simultaneously, it's almost certainly a non-human object.
+    face_crop = img_bgr[max(0,y):min(h,y+h_f), max(0,x):min(w,x+w_f)]
+    if face_crop.size > 0:
+        ch_stds = [float(face_crop[:,:,c].std()) for c in range(3)]
+        # Human faces: at least one channel std > 18 (eyes, lips, shadows create variation)
+        # Uniform plush toys: all channels std < 18
+        if max(ch_stds) < 18.0:
+            return None, "not_human"
+        # Additional: ratio between max and min channel std.
+        # Plush toys are monochromatic — all channels move together.
+        # Human faces have independent channel variation (lips red, eyes dark, etc.)
+        if min(ch_stds) > 0 and max(ch_stds) / min(ch_stds) < 1.3:
+            # All channels vary by the same amount → monochromatic object
+            # But only reject if the overall std is also low (not a high-contrast human)
+            if max(ch_stds) < 35.0:
+                return None, "not_human"
+
+    # ── Gate 6: AI-powered human verification (Claude API)
     # Ask the vision model whether the image actually shows a real human face.
     # This catches stuffed animals, dolls, printed images, cartoon faces, etc.
     # that may pass the colour/texture heuristics above.
