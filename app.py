@@ -599,6 +599,18 @@ def detect_face_and_extract_skin(img_bgr):
     # Apply NMS to merge overlapping detections of the same face
     faces = _nms_faces(list(faces))
     if len(faces) > 1:
+        # Check if any detected face has visible eyes — if none do,
+        # it's likely a back-of-head photo, not truly multiple faces.
+        any_eyes = False
+        for fx, fy, fw, fh in faces:
+            roi_g = cv2.cvtColor(img_bgr[max(0,fy):min(h,fy+fh), max(0,fx):min(w,fx+fw)], cv2.COLOR_BGR2GRAY)
+            upper = roi_g[:int(fh*0.60), :]
+            e = eye_cascade.detectMultiScale(upper, scaleFactor=1.1, minNeighbors=3, minSize=(15,15))
+            if len(e) > 0:
+                any_eyes = True
+                break
+        if not any_eyes:
+            return None, "no_face_forward"
         return None, "multiple_faces"
     x, y, w_f, h_f = faces[0]
     # Face too small check
@@ -619,7 +631,7 @@ def detect_face_and_extract_skin(img_bgr):
         # Retry with relaxed params — handles slightly rotated faces
         eyes_found = eye_cascade.detectMultiScale(upper_roi, scaleFactor=1.05, minNeighbors=3, minSize=(15, 15))
     if len(eyes_found) == 0:
-        return None, "not_human"
+        return None, "no_face_forward"
     # ── End Gate 0 ────────────────────────────────────────────────────────
 
     # ── Human verification ────────────────────────────────────────────────
@@ -1526,8 +1538,8 @@ def render_single_photo_input():
         step_text.empty(); prog.empty(); skel.empty()
 
         results, status, quality = analyze_photo(image)
-        if status == "no_face":
-            st.error("❌ No face detected. Please upload a clear front-facing photo.")
+        if status == "no_face" or status == "no_face_forward":
+            st.error("❌ No face detected. Please upload a clear, front-facing photo — side profiles and back-of-head photos are not supported.")
         elif status == "multiple_faces":
             st.error("❌ Multiple faces detected. Please upload a photo with only one person.")
         elif status == "face_too_small":
@@ -1628,6 +1640,7 @@ def render_compare_input():
             res_a, sa, _ = analyze_photo(img_a); res_b, sb, _ = analyze_photo(img_b)
         _STATUS_MSG = {
             "no_face": "No face detected. Please upload a clear front-facing photo.",
+            "no_face_forward": "No face detected. Please upload a clear, front-facing photo — side profiles and back-of-head photos are not supported.",
             "multiple_faces": "Multiple faces detected. Please upload a photo with only one person.",
             "face_too_small": "Face too small — move closer to the camera.",
             "not_human": "Non-human face detected. Please use a real photo of a real person — dolls, anime, animals, and illustrations are not supported.",
