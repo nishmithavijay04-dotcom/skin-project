@@ -429,6 +429,7 @@ def load_css():
 # FACE DETECTION
 # ================================================================
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+eye_cascade  = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
 
 MAX_UPLOAD_MB = 200
 
@@ -605,6 +606,21 @@ def detect_face_and_extract_skin(img_bgr):
         return None, "face_too_small"
     x, y = max(0, x), max(0, y)
     w_f, h_f = min(w - x, w_f), min(h - y, h_f)
+
+    # ── Gate 0: Eye detection — must find at least one forward-facing eye ──
+    # haarcascade_frontalface_default detects the back of heads, side profiles,
+    # and textured objects. Requiring at least one detectable eye inside the
+    # face bounding box ensures the face is actually front-facing.
+    face_roi_gray = cv2.cvtColor(img_bgr[y:y+h_f, x:x+w_f], cv2.COLOR_BGR2GRAY)
+    # Search only the upper 60% of the face box (eyes are never in the chin area)
+    upper_roi = face_roi_gray[:int(h_f * 0.60), :]
+    eyes_found = eye_cascade.detectMultiScale(upper_roi, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20))
+    if len(eyes_found) == 0:
+        # Retry with relaxed params — handles slightly rotated faces
+        eyes_found = eye_cascade.detectMultiScale(upper_roi, scaleFactor=1.05, minNeighbors=3, minSize=(15, 15))
+    if len(eyes_found) == 0:
+        return None, "not_human"
+    # ── End Gate 0 ────────────────────────────────────────────────────────
 
     # ── Human verification ────────────────────────────────────────────────
     # Sample the central forehead + cheek regions to check for human skin tones
