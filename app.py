@@ -679,6 +679,36 @@ def detect_face_and_extract_skin(img_bgr):
     if flat_color_count >= 3:
         return None, "not_human"
 
+    # ── Gate 3b: Anime / illustration detector ────────────────────────────
+    # Anime skin is painted with very smooth, low-noise gradients.
+    # Real human skin photographed has natural high-frequency noise from:
+    #   pores, fine hair, micro-shadows, JPEG sensor noise.
+    # We measure this using the mean absolute deviation of a high-pass filter
+    # on the face crop. Anime/illustrations score very low; real photos score high.
+    face_crop_gate3 = img_bgr[max(0,y):min(h,y+h_f), max(0,x):min(w,x+w_f)]
+    if face_crop_gate3.size > 0:
+        gray_face = cv2.cvtColor(face_crop_gate3, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        # High-pass: subtract blurred version to isolate high-frequency noise
+        blurred = cv2.GaussianBlur(gray_face, (5, 5), 0)
+        highpass = np.abs(gray_face - blurred)
+        hf_mean = float(np.mean(highpass))
+        # Real photos: hf_mean typically > 3.5 (sensor noise + texture)
+        # Anime / illustrations: hf_mean typically < 2.5 (smooth painted fills)
+        if hf_mean < 2.5:
+            return None, "not_human"
+
+        # Secondary: edge density check.
+        # Anime faces have very clean, sharp, widely-spaced edges (ink outlines).
+        # Real faces have dense, diffuse edges (pores, hair, skin texture).
+        edges = cv2.Canny(cv2.convertScaleAbs(gray_face), 80, 160)
+        edge_density = float(np.sum(edges > 0)) / edges.size
+        # Anime: sparse clean outlines → edge_density typically 0.02–0.06
+        # Real photo: dense texture edges → edge_density typically > 0.07
+        # Only reject if BOTH high-pass noise is low AND edges are very sparse
+        if hf_mean < 3.5 and edge_density < 0.055:
+            return None, "not_human"
+    # ── End Gate 3b ───────────────────────────────────────────────────────
+
     # ── Gate 4: Sclera (eye white) check
     # Real human eyes have visible white sclera — bright, near-white pixels
     # in the eye region. Stuffed animals, dolls, and most non-humans lack this.
